@@ -1,0 +1,44 @@
+services:
+  _defaults:
+    public: false
+    autowire: false
+    autoconfigure: false
+
+  hoffens.b2b.prestashop.customer_group_provider:
+    class: Hoffens\B2B\PrestaShop\CustomerGroupProvider
+    public: true
+
+  hoffens.b2b.configuration_provider:
+    class: Hoffens\B2B\PrestaShop\PrestaShopConfigurationProvider
+
+  hoffens.b2b.configuration:
+    class: Hoffens\B2B\Configuration\IntegrationConfig
+    factory: ['@hoffens.b2b.configuration_provider', 'get']
+
+  hoffens.b2b.http_transport:
+    class: Hoffens\B2B\Infrastructure\Http\CurlTransport
+    arguments:
+      - '@hoffens.b2b.configuration'
+
+  hoffens.b2b.api_client:
+    class: Hoffens\B2B\Infrastructure\Http\HoffensApiClient
+    arguments:
+      - '@hoffens.b2b.http_transport'
+
+  hoffens.b2b.api:
+    class: Hoffens\B2B\Adapter\Api\HoffensRestApi
+    public: true
+    arguments:
+      - '@hoffens.b2b.api_client'
+
+  hoffens.b2b.login_cache:
+    class: Hoffens\B2B\Adapter\Persistence\DbLoginSnapshotCache
+    public: true
+
+  hoffens.b2b.customer_card_code_provider:
+    class: Hoffens\B2B\Adapter\PrestaShop\CustomerCardCodeProvider
+    public: true
+
+  hoffens.b2b.login_metric_recorder:
+    class: Hoffens\B2B\Adapter\Persistence\DbLoginMetricRecorder
+    public: true

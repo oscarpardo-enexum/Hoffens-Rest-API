@@ -1,0 +1,12 @@
+/hoffensb2b/vendor/
+/hoffensb2b/.phpunit.result.cache
+/hoffensb2b/config/local.php
+/.phpunit.cache/
+
+# Paquetes y respaldos generados
+*.tar
+*.tar.gz
+*.tgz
+*.zip
+*.7z
+*.rar

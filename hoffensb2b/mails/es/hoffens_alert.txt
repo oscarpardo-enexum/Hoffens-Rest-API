@@ -1,0 +1,6 @@
+Integración REST Hoffens B2B: {state}
+
+Incidente: {fingerprint}
+Detalle: {message_text}
+Ocurrencias: {occurrences}
+Última detección: {last_seen_at}

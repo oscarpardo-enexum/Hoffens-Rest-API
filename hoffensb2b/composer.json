@@ -1,0 +1,22 @@
+{
+  "name": "enexum/hoffensb2b",
+  "description": "Integración REST B2B entre PrestaShop y SAP para Hoffens",
+  "type": "prestashop-module",
+  "license": "proprietary",
+  "require": {
+    "php": ">=7.1"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^7.5"
+  },
+  "autoload": {
+    "psr-4": {
+      "Hoffens\\B2B\\": "src/"
+    }
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "Hoffens\\B2B\\Tests\\": "tests/"
+    }
+  }
+}

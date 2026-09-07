@@ -1,0 +1,23 @@
+<?php
+
+namespace Hoffens\B2B\Configuration;
+
+final class ConfigKeys
+{
+    const ENABLED = 'HOFFENS_B2B_REST_ENABLED';
+    const MODE = 'HOFFENS_B2B_MODE';
+    const BASE_URL = 'HOFFENS_B2B_API_BASE_URL';
+    const TOKEN = 'HOFFENS_B2B_API_TOKEN';
+    const B2B_GROUPS = 'HOFFENS_B2B_GROUP_IDS';
+    const CONNECT_TIMEOUT = 'HOFFENS_B2B_CONNECT_TIMEOUT';
+    const TIMEOUT = 'HOFFENS_B2B_TIMEOUT';
+    const RETRIES = 'HOFFENS_B2B_RETRIES';
+    const PRICE_TTL = 'HOFFENS_B2B_PRICE_TTL';
+    const ALERT_EMAILS = 'HOFFENS_B2B_ALERT_EMAILS';
+    const ALERT_COOLDOWN = 'HOFFENS_B2B_ALERT_COOLDOWN';
+    const HEALTH_MAX_MS = 'HOFFENS_B2B_HEALTH_MAX_MS';
+    const METRIC_RETENTION_DAYS = 'HOFFENS_B2B_METRIC_RETENTION';
+    const CRON_TOKEN = 'HOFFENS_B2B_CRON_TOKEN';
+
+    private function __construct() {}
+}

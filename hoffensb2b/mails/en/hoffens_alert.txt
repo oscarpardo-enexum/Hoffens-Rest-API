@@ -1,0 +1,6 @@
+Hoffens B2B REST integration: {state}
+
+Incident: {fingerprint}
+Detail: {message_text}
+Occurrences: {occurrences}
+Last detection: {last_seen_at}
