@@ -98,11 +98,15 @@ $queries = array(
         `payload` MEDIUMTEXT NOT NULL,
         `remote_request_id` VARCHAR(100) NULL,
         `remote_status` VARCHAR(20) NULL,
+        `remote_reference` VARCHAR(100) NULL,
+        `remote_status_url` VARCHAR(500) NULL,
         `status` VARCHAR(20) NOT NULL DEFAULT "queued",
         `attempts` SMALLINT UNSIGNED NOT NULL DEFAULT 0,
         `available_at` DATETIME NOT NULL,
         `last_attempt_at` DATETIME NULL,
         `last_error` VARCHAR(500) NULL,
+        `lock_token` VARCHAR(64) NULL,
+        `locked_at` DATETIME NULL,
         `created_at` DATETIME NOT NULL,
         `updated_at` DATETIME NOT NULL,
         `completed_at` DATETIME NULL,
@@ -110,6 +114,7 @@ $queries = array(
         UNIQUE KEY `uniq_operation_local` (`operation_type`, `local_reference`),
         UNIQUE KEY `uniq_idempotency` (`idempotency_key`),
         KEY `idx_dispatch` (`status`, `available_at`),
+        KEY `idx_lock` (`lock_token`, `locked_at`),
         KEY `idx_remote_request` (`remote_request_id`)
     ) ENGINE=' . _MYSQL_ENGINE_ . ' DEFAULT CHARSET=utf8',
 );

@@ -44,3 +44,14 @@ services:
   hoffens.b2b.login_metric_recorder:
     class: Hoffens\B2B\Adapter\Persistence\DbLoginMetricRecorder
     public: true
+
+  hoffens.b2b.transaction_outbox:
+    class: Hoffens\B2B\Adapter\Persistence\DbTransactionOutbox
+    public: true
+
+  hoffens.b2b.transaction_worker:
+    class: Hoffens\B2B\Application\Transaction\ProcessTransactionalOutbox
+    public: true
+    arguments:
+      - '@hoffens.b2b.transaction_outbox'
+      - '@hoffens.b2b.api'

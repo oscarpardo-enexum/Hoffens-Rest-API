@@ -20,6 +20,7 @@ final class ConfigKeys
     const HEALTH_MAX_MS = 'HOFFENS_B2B_HEALTH_MAX_MS';
     const METRIC_RETENTION_DAYS = 'HOFFENS_B2B_METRIC_RETENTION';
     const CRON_TOKEN = 'HOFFENS_B2B_CRON_TOKEN';
+    const TRANSACTION_WRITES_ENABLED = 'HOFFENS_B2B_TRANSACTION_WRITES';
 
     private function __construct() {}
 }

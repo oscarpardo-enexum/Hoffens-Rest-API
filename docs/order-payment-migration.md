@@ -119,3 +119,18 @@ debe aparecer en logs, métricas ni pantallas generales.
 El cron externo únicamente dispara el trabajador; la protección, los lotes, los
 reintentos y la conciliación pertenecen al módulo. Su programación en Hostinger queda
 a cargo del administrador del ambiente.
+
+## Trabajador implementado
+
+El trabajador común toma lotes pequeños mediante bloqueo transaccional recuperable,
+valida el hash antes de usar el payload y conserva la misma clave de idempotencia en
+cada reintento. Los errores HTTP permanentes (`400`, `401`, `403`, `404`, `409` y
+`422`) pasan a revisión manual; los fallos transitorios usan espera exponencial con
+un máximo de ocho intentos. Una aceptación queda programada para consulta hasta
+`creadaSap` o `observada`.
+
+Existen dos barreras independientes: el modo general debe ser `rest` y además debe
+activarse explícitamente “Permitir POST de pedidos y pagos”. Mientras cualquiera de
+ellas permanezca desactivada, el cron solo cuenta operaciones pendientes y no toma
+lotes ni llama endpoints transaccionales. El Back Office muestra estados, referencias
+y errores sanitizados, pero nunca payloads ni claves de idempotencia.

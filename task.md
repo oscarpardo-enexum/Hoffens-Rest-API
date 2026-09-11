@@ -29,7 +29,7 @@ No crear ni subir ZIP, TAR ni respaldos durante el despliegue del módulo.
 - [x] Resincronizar al reanudar una sesión persistente, sin consultar SAP en cada página.
 - [x] Alertas a TI con deduplicación y recuperación; el agendamiento queda a cargo del administrador.
 - [x] Definir umbrales operativos y política de retención de métricas.
-- [ ] Programar en hPanel el cron de monitoreo cada 5 minutos. *(Responsable: administrador Hostinger)*
+- [x] Programar en hPanel el cron de monitoreo cada 5 minutos. *(Responsable: administrador Hostinger)*
 
 ## 3. Migración funcional REST
 
@@ -45,17 +45,17 @@ No crear ni subir ZIP, TAR ni respaldos durante el despliegue del módulo.
 - [x] Detalle documental, trazabilidad y respaldo digitalizado seguro.
 - [x] Levantar el flujo heredado de órdenes/pagos y contrastarlo con el contrato REST.
 - [x] Definir mapeo, estados, idempotencia, convivencia y corte de SOAP (`docs/order-payment-migration.md`).
-- [~] Crear outbox transaccional común para solicitudes de pedido y pagos. *(Esquema, dominio y encolado listos; falta trabajador)*
+- [x] Crear outbox transaccional común con encolado idempotente, trabajador, bloqueo concurrente y reintentos.
 - [x] Construir y validar el payload contractual de solicitud de pedido, sin precios ni impuestos.
 - [~] Resolver `direccionDespacho` desde `address.correlativo_sap` y bloquear códigos ausentes/obsoletos. *(Resolvedor listo; falta conectarlo al evento de pedido)*
 - [ ] Acordar el mapeo a `glosa` de comentarios, retiro por tercero y referencias adicionales.
 - [ ] Confirmar el estado/evento local que habilita el envío; no asumir los IDs personalizados `1` y `3`.
-- [ ] Implementar envío de pedidos con clave estable y seguimiento hasta `creadaSap`/`observada`.
+- [~] Implementar envío de pedidos con clave estable y seguimiento hasta `creadaSap`/`observada`. *(Trabajador listo; falta conectar el evento acordado)*
 - [ ] Persistir `DocEntry` y tipo documental desde la selección de deuda antes de iniciar el pago.
 - [x] Construir y validar el payload de pago: documentos únicos, `DocEntry` y suma FC menos NC.
 - [ ] Encolar pagos solo después de la confirmación del proveedor y validar la suma FC/ND menos NC.
-- [ ] Implementar envío de pagos con clave estable, conciliación y visualización de observados.
-- [ ] Probar pedidos y pagos en modo sombra antes de habilitar cualquier POST real.
+- [~] Implementar envío de pagos con clave estable, conciliación y visualización de observados. *(Trabajador y panel listos; falta captura posterior al proveedor)*
+- [~] Probar pedidos y pagos en modo sombra antes de habilitar cualquier POST real. *(Barrera de cero POST lista; faltan muestras capturadas)*
 - [ ] Mapear y retirar gradualmente las 13 operaciones SOAP reemplazadas.
 
 ## 4. Reglas del portal
@@ -80,7 +80,7 @@ No crear ni subir ZIP, TAR ni respaldos durante el despliegue del módulo.
 
 - Ambiente: pruebas (`hoffensdesa.enexum.cl`).
 - Resultado login: `b2b_ready`, sin fallos.
-- Versión desplegada: `0.11.0`.
+- Versión desplegada: `0.12.0`.
 - Muestra integral: 884 ms total y 335 ms de escritura.
 - Precios: 2.029 recibidos, 1.630 escritos, 399 sin SKU local y 0 duplicados.
 - Precio específico validado para el cliente independientemente de su grupo activo.
@@ -103,7 +103,7 @@ No crear ni subir ZIP, TAR ni respaldos durante el despliegue del módulo.
 - Contrato transaccional revisado: pedidos y pagos responden `202` y requieren outbox, idempotencia y conciliación.
 - Brecha de direcciones: `direccionDespacho` debe usar `address.correlativo_sap`; hay registros locales sin código SAP.
 - Brecha de pagos: el flujo antiguo conserva folio, pero REST exige persistir `DocEntry` y tipo documental.
-- Outbox 0.8.0 instalada y vacía; todavía no existen hooks ni trabajadores que ejecuten POST.
+- Outbox creada originalmente en 0.8.0; el trabajador se incorporó en 0.12.0 y permanece sin operaciones capturadas.
 - Validación posterior: sintaxis PHP correcta, módulo activo, tabla creada y portada HTTP 200.
 - Versión 0.9.0 desplegada: validación crítica del perfil/precios y separación entre cliente integrado y observador.
 - Reintentos ampliados a timeout HTTP 408, límite 429 y errores transitorios 500/502/503/504.
@@ -121,3 +121,9 @@ No crear ni subir ZIP, TAR ni respaldos durante el despliegue del módulo.
 - El caché de login se descarta si está incompleto o corresponde a un `cardCode` distinto.
 - Upgrade validado: versión de base de datos 0.11.0, configuración de grupos eliminada y hook frontal registrado una vez.
 - Sintaxis PHP validada en la VPS; portada mantiene HTTP 503 por el modo mantenimiento ya identificado.
+- Versión 0.12.0 desplegada: trabajador común de pedidos/pagos con lotes de 10, bloqueo recuperable e idempotencia estable.
+- Reintentos transaccionales con espera exponencial y máximo de 8 intentos; errores permanentes pasan a revisión manual.
+- Seguimiento preparado hasta estados terminales `creadaSap`/`observada`, conservando identificador y referencia SAP.
+- Doble barrera validada: modo `shadow`, escritura transaccional desactivada, 0 filas reclamadas y 0 POST ejecutados.
+- Esquema validado con las 4 columnas nuevas de seguimiento/bloqueo; outbox continúa vacía.
+- Panel transaccional de Back Office validado sin mostrar payloads ni claves de idempotencia.

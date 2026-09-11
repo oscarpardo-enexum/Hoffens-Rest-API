@@ -17,7 +17,7 @@ class HoffensB2B extends Module
     {
         $this->name = 'hoffensb2b';
         $this->tab = 'administration';
-        $this->version = '0.11.0';
+        $this->version = '0.12.0';
         $this->author = 'Enexum';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -51,6 +51,7 @@ class HoffensB2B extends Module
             && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::HEALTH_MAX_MS, 2000)
             && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::METRIC_RETENTION_DAYS, 30)
             && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::CRON_TOKEN, Tools::passwdGen(40))
+            && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::TRANSACTION_WRITES_ENABLED, 0)
             && $this->registerHook('actionAuthentication')
             && $this->registerHook('actionFrontControllerInitAfter')
             && $this->registerHook('displayCustomerLoginFormAfter')
@@ -76,6 +77,7 @@ class HoffensB2B extends Module
             \Hoffens\B2B\Configuration\ConfigKeys::HEALTH_MAX_MS,
             \Hoffens\B2B\Configuration\ConfigKeys::METRIC_RETENTION_DAYS,
             \Hoffens\B2B\Configuration\ConfigKeys::CRON_TOKEN,
+            \Hoffens\B2B\Configuration\ConfigKeys::TRANSACTION_WRITES_ENABLED,
         ) as $key) {
             Configuration::deleteByName($key);
         }
@@ -157,13 +159,14 @@ class HoffensB2B extends Module
             try {
                 $maintenance = $this->runMaintenance();
                 $output .= $this->displayConfirmation(sprintf(
-                    $this->l('Monitoreo ejecutado en %d ms. Estado: %s. Alertas enviadas: %d; pendientes con error: %d.'),
+                    $this->l('Monitoreo ejecutado en %d ms. Estado: %s. Alertas enviadas: %d; pendientes con error: %d; operaciones pendientes: %d.'),
                     $maintenance['health']['elapsedMs'],
                     !$maintenance['health']['healthy']
                         ? $this->l('incidencia')
                         : (!empty($maintenance['health']['slow']) ? $this->l('saludable con latencia alta') : $this->l('saludable')),
                     $maintenance['notifications']['sent'],
-                    $maintenance['notifications']['failed']
+                    $maintenance['notifications']['failed'],
+                    $maintenance['transactions']['pending']
                 ));
             } catch (Exception $exception) {
                 $output .= $this->displayError($this->l('Falló el monitoreo: ') . $exception->getMessage());
@@ -174,6 +177,7 @@ class HoffensB2B extends Module
             . $this->renderMonitoringPanel()
             . $this->renderCatalogSyncPanel()
             . $this->renderEndpointDiagnostics($endpointResult)
+            . $this->renderOutboxPanel()
             . $this->renderPerformancePanel();
     }
 
@@ -423,13 +427,24 @@ class HoffensB2B extends Module
                 $this->parseAlertEmails((string) Configuration::get($keys::ALERT_EMAILS))
             )
         ))->execute();
+        $transactionMode = (string) Configuration::get($keys::MODE) === 'rest'
+            && (bool) Configuration::get($keys::TRANSACTION_WRITES_ENABLED) ? 'rest' : 'shadow';
+        $transactions = (new \Hoffens\B2B\Application\Transaction\ProcessTransactionalOutbox(
+            new \Hoffens\B2B\Adapter\Persistence\DbTransactionOutbox(),
+            $this->buildApi()
+        ))->execute($transactionMode, 10);
         $retentionDays = max(7, min(365, (int) Configuration::get($keys::METRIC_RETENTION_DAYS)));
         Db::getInstance()->execute('DELETE FROM `' . _DB_PREFIX_ . 'hoffens_b2b_login_metric` '
             . 'WHERE created_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL ' . $retentionDays . ' DAY)');
         Db::getInstance()->execute('DELETE FROM `' . _DB_PREFIX_ . 'hoffens_b2b_incident` '
             . "WHERE status='resolved' AND recovered_at < DATE_SUB(UTC_TIMESTAMP(), INTERVAL "
             . $retentionDays . ' DAY)');
-        return array('health' => $health, 'notifications' => $notifications, 'retentionDays' => $retentionDays);
+        return array(
+            'health' => $health,
+            'notifications' => $notifications,
+            'transactions' => $transactions,
+            'retentionDays' => $retentionDays,
+        );
     }
 
     private function saveConfiguration()
@@ -447,6 +462,7 @@ class HoffensB2B extends Module
         $alertCooldown = (int) Tools::getValue($keys::ALERT_COOLDOWN);
         $healthMaxMs = (int) Tools::getValue($keys::HEALTH_MAX_MS);
         $metricRetention = (int) Tools::getValue($keys::METRIC_RETENTION_DAYS);
+        $transactionWrites = (int) Tools::getValue($keys::TRANSACTION_WRITES_ENABLED);
         $errors = array();
         if (strpos($baseUrl, 'https://') !== 0) {
             $errors[] = $this->l('La URL base debe utilizar HTTPS.');
@@ -503,6 +519,7 @@ class HoffensB2B extends Module
         Configuration::updateValue($keys::ALERT_COOLDOWN, $alertCooldown);
         Configuration::updateValue($keys::HEALTH_MAX_MS, $healthMaxMs);
         Configuration::updateValue($keys::METRIC_RETENTION_DAYS, $metricRetention);
+        Configuration::updateValue($keys::TRANSACTION_WRITES_ENABLED, $transactionWrites === 1 ? 1 : 0);
 
         $newToken = trim((string) Tools::getValue($keys::TOKEN));
         if ($newToken !== '') {
@@ -535,6 +552,7 @@ class HoffensB2B extends Module
             $keys::ALERT_COOLDOWN => Configuration::get($keys::ALERT_COOLDOWN),
             $keys::HEALTH_MAX_MS => Configuration::get($keys::HEALTH_MAX_MS),
             $keys::METRIC_RETENTION_DAYS => Configuration::get($keys::METRIC_RETENTION_DAYS),
+            $keys::TRANSACTION_WRITES_ENABLED => (int) Configuration::get($keys::TRANSACTION_WRITES_ENABLED),
         );
 
         return $helper->generateForm(array(array('form' => array(
@@ -572,6 +590,15 @@ class HoffensB2B extends Module
                 array('type' => 'text', 'label' => $this->l('Deduplicación de alertas (min)'), 'name' => $keys::ALERT_COOLDOWN),
                 array('type' => 'text', 'label' => $this->l('Healthcheck máximo (ms)'), 'name' => $keys::HEALTH_MAX_MS),
                 array('type' => 'text', 'label' => $this->l('Retención de métricas (días)'), 'name' => $keys::METRIC_RETENTION_DAYS),
+                array(
+                    'type' => 'switch', 'label' => $this->l('Permitir POST de pedidos y pagos'),
+                    'name' => $keys::TRANSACTION_WRITES_ENABLED,
+                    'desc' => $this->l('Mantener desactivado hasta completar las pruebas sombra y el corte de SOAP.'),
+                    'values' => array(
+                        array('id' => 'transactions_on', 'value' => 1, 'label' => $this->l('Sí')),
+                        array('id' => 'transactions_off', 'value' => 0, 'label' => $this->l('No')),
+                    ),
+                ),
             ),
             'submit' => array('title' => $this->l('Guardar')),
             'buttons' => array(array(
@@ -756,6 +783,51 @@ class HoffensB2B extends Module
                     . '<td>' . (int) $row['price_unmatched'] . '</td>'
                     . '<td>' . $this->formatBytes((int) $row['prices_bytes']) . '</td>'
                     . '<td>' . ((int) $row['cache_hit'] === 1 ? $this->l('Sí') : $this->l('No')) . '</td></tr>';
+            }
+        }
+        return $html . '</tbody></table></div></div>';
+    }
+
+    private function renderOutboxPanel()
+    {
+        $table = _DB_PREFIX_ . 'hoffens_b2b_outbox';
+        $summary = Db::getInstance()->executeS(
+            'SELECT status,COUNT(*) AS total FROM `' . bqSQL($table) . '` GROUP BY status ORDER BY status'
+        );
+        $rows = Db::getInstance()->executeS(
+            'SELECT operation_type,local_reference,status,remote_status,remote_reference,attempts,last_error,updated_at '
+            . 'FROM `' . bqSQL($table) . '` ORDER BY id_outbox DESC LIMIT 20'
+        );
+
+        $html = '<div class="panel"><div class="panel-heading">'
+            . $this->l('Operaciones transaccionales REST') . '</div><p class="help-block">'
+            . $this->l('No se muestran payloads ni claves de idempotencia. En modo sombra no se ejecutan solicitudes POST.')
+            . '</p><p>';
+        if (!$summary) {
+            $html .= $this->l('La outbox está vacía.');
+        } else {
+            foreach ($summary as $item) {
+                $html .= '<span class="label label-default" style="margin-right:8px">'
+                    . Tools::safeOutput($item['status']) . ': ' . (int) $item['total'] . '</span>';
+            }
+        }
+        $html .= '</p><div class="table-responsive"><table class="table table-striped table-condensed">'
+            . '<thead><tr><th>' . $this->l('Tipo') . '</th><th>' . $this->l('Referencia local') . '</th>'
+            . '<th>' . $this->l('Estado local') . '</th><th>' . $this->l('Estado SAP') . '</th>'
+            . '<th>' . $this->l('Referencia SAP') . '</th><th>' . $this->l('Intentos') . '</th>'
+            . '<th>' . $this->l('Último resultado') . '</th><th>' . $this->l('Actualizado UTC') . '</th></tr></thead><tbody>';
+        if (!$rows) {
+            $html .= '<tr><td colspan="8" class="text-center">' . $this->l('Todavía no existen operaciones.') . '</td></tr>';
+        } else {
+            foreach ($rows as $row) {
+                $html .= '<tr><td>' . Tools::safeOutput($row['operation_type']) . '</td>'
+                    . '<td>' . Tools::safeOutput($row['local_reference']) . '</td>'
+                    . '<td>' . Tools::safeOutput($row['status']) . '</td>'
+                    . '<td>' . Tools::safeOutput((string) $row['remote_status']) . '</td>'
+                    . '<td>' . Tools::safeOutput((string) $row['remote_reference']) . '</td>'
+                    . '<td>' . (int) $row['attempts'] . '</td>'
+                    . '<td>' . Tools::safeOutput((string) $row['last_error']) . '</td>'
+                    . '<td>' . Tools::safeOutput($row['updated_at']) . '</td></tr>';
             }
         }
         return $html . '</tbody></table></div></div>';
