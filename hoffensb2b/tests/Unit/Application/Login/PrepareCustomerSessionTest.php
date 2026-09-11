@@ -2,9 +2,8 @@
 
 namespace Hoffens\B2B\Tests\Unit\Application\Login;
 
-use Hoffens\B2B\Application\Access\B2BAccessPolicy;
+use Hoffens\B2B\Application\Access\CustomerAccessPolicy;
 use Hoffens\B2B\Application\Login\PrepareCustomerSession;
-use Hoffens\B2B\Contract\CustomerGroupProviderInterface;
 use Hoffens\B2B\Port\CustomerCardCodeProviderInterface;
 use Hoffens\B2B\Port\CustomerPriceSynchronizerInterface;
 use Hoffens\B2B\Port\HoffensApiInterface;
@@ -16,7 +15,7 @@ final class PrepareCustomerSessionTest extends TestCase
     public function testEveryAuthenticatedCustomerWithCardCodeCallsApi()
     {
         $api = new FakeApi();
-        $useCase = $this->useCase(array(3), $api, 'C1');
+        $useCase = $this->useCase($api, 'C1');
 
         $decision = $useCase->execute(10);
 
@@ -29,7 +28,7 @@ final class PrepareCustomerSessionTest extends TestCase
     public function testB2CWithoutCardCodeRemainsObserver()
     {
         $api = new FakeApi();
-        $decision = $this->useCase(array(3), $api, null)->execute(10);
+        $decision = $this->useCase($api, null)->execute(10);
 
         $this->assertTrue($decision->isAllowed());
         $this->assertFalse($decision->isB2B());
@@ -40,7 +39,7 @@ final class PrepareCustomerSessionTest extends TestCase
     public function testB2BLoadsProfileAndPricesOnce()
     {
         $api = new FakeApi();
-        $useCase = $this->useCase(array(8), $api, 'C1');
+        $useCase = $this->useCase($api, 'C1');
 
         $decision = $useCase->execute(10);
 
@@ -49,36 +48,29 @@ final class PrepareCustomerSessionTest extends TestCase
         $this->assertSame(1, $api->loginCalls);
     }
 
-    public function testB2BWithoutCardCodeIsDeniedWithoutCallingApi()
+    public function testCustomerWithoutCardCodeRemainsObserverWithoutCallingApi()
     {
         $api = new FakeApi();
-        $useCase = $this->useCase(array(8), $api, null);
+        $useCase = $this->useCase($api, null);
 
         $decision = $useCase->execute(10);
 
-        $this->assertFalse($decision->isAllowed());
-        $this->assertSame('missing_card_code', $decision->reason());
+        $this->assertTrue($decision->isAllowed());
+        $this->assertFalse($decision->isB2B());
+        $this->assertSame('b2c_observer', $decision->reason());
         $this->assertSame(0, $api->loginCalls);
     }
 
-    private function useCase(array $groups, FakeApi $api, $cardCode)
+    private function useCase(FakeApi $api, $cardCode)
     {
         return new PrepareCustomerSession(
-            new B2BAccessPolicy(new FakeGroups($groups), array(8)),
-            new FakeCardCodes($cardCode),
+            new CustomerAccessPolicy(new FakeCardCodes($cardCode)),
             $api,
             new FakeCache(),
             new FakePriceSynchronizer(),
             0
         );
     }
-}
-
-final class FakeGroups implements CustomerGroupProviderInterface
-{
-    private $groups;
-    public function __construct(array $groups) { $this->groups = $groups; }
-    public function groupsForCustomer($customerId) { return $this->groups; }
 }
 
 final class FakeCardCodes implements CustomerCardCodeProviderInterface

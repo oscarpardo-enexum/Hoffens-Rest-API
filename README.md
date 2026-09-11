@@ -12,7 +12,7 @@ El código productivo vivirá en un módulo nuevo. No depende de
 - Núcleo desacoplado mediante interfaces y servicios PSR-4.
 - Compatibilidad con PrestaShop 1.7.8.11 y PHP 7.1+.
 - B2B puede comprar; B2C solo puede consultar el catálogo.
-- La pertenencia B2B se determina mediante IDs de grupos configurables.
+- La identidad B2B y el permiso de compra se determinan por un `cardCode` local válido.
 - REST puede permanecer desactivado hasta recibir el token `b2b_...`.
 - Credenciales fuera del repositorio y nunca incorporadas a URLs o logs.
 
@@ -21,7 +21,7 @@ La arquitectura y el proceso de evolución están documentados en
 
 ## Estado del scaffold
 
-- Configuración de URL, Bearer token, timeouts, reintentos y grupos B2B.
+- Configuración de URL, Bearer token, timeouts y reintentos.
 - Botón de healthcheck desde el Back Office.
 - Consola segura para verificar cada endpoint GET con tiempos y conteos.
 - Modo desactivado, sombra y REST.

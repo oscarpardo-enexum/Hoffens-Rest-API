@@ -40,21 +40,22 @@ Las clases de dominio y aplicación no deben usar `Context`, `Db`, `Tools`,
 
 - Invitado: catálogo visible, compra no autorizada.
 - Cliente B2C autenticado: catálogo visible, compra no autorizada.
-- Cliente B2B autenticado y activo: catálogo y compra autorizados.
-- La pertenencia B2B se resuelve por grupo, no por correo, dominio o nombre.
+- Cliente autenticado con `cardCode` local válido: catálogo y compra autorizados.
+- La identidad B2B se resuelve exclusivamente desde `customer.card_code`, no por
+  grupo, correo, dominio o nombre.
 - La autorización debe comprobarse nuevamente en servidor al modificar el
   carrito y antes de crear una orden. Ocultar botones no es seguridad.
 
 Todos los clientes autenticados pueden generar telemetría de login. Un `cardCode`
-válido identifica al cliente que participa en la integración SAP, aunque todavía
-no se hayan configurado grupos B2B; para él se validan y actualizan los precios.
-Los grupos quedan reservados para autorizar la compra. Un cliente sin `cardCode`
-permanece como observador, salvo que pertenezca explícitamente a un grupo B2B, en
-cuyo caso la falta del identificador es un error crítico.
+válido identifica al cliente que participa en la integración SAP; para él se
+validan y actualizan los precios. Quien no tiene `cardCode` permanece como
+observador B2C.
 
-El scaffold todavía no registra hooks que cambien el comportamiento del sitio.
-Eso se hará después de mapear el flujo B2B actual, para no duplicar ni romper
-las restricciones existentes.
+En modo `rest`, `actionFrontControllerInitAfter` revalida el `cardCode` local
+antes de que PrestaShop procese una modificación del carrito o el checkout. La
+misma barrera cubre controladores frontales de medios de pago para impedir un
+salto directo. Las notificaciones y callbacks de proveedor sin sesión no se
+interfieren. La comprobación es local y no agrega llamadas a SAP.
 
 ## Configuración y secretos
 

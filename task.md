@@ -16,6 +16,7 @@ No crear ni subir ZIP, TAR ni respaldos durante el despliegue del módulo.
 - [x] Crear módulo independiente `hoffensb2b`, sin modificar el core ni `ws_integracion`.
 - [x] Separar aplicación, dominio, puertos, adaptadores e infraestructura.
 - [x] Configurar URL, Bearer token, timeouts, reintentos, caché y modos `disabled/shadow/rest`.
+- [x] Usar `cardCode` local como única identidad B2B, sin selector ni dependencia de grupos.
 - [x] Implementar transporte HTTP con TLS, compresión, reintentos y llamadas concurrentes.
 - [x] Mantener secretos y payloads fuera del repositorio y los logs.
 
@@ -60,10 +61,10 @@ No crear ni subir ZIP, TAR ni respaldos durante el despliegue del módulo.
 ## 4. Reglas del portal
 
 - [x] Validar información crítica de SAP antes de habilitar la operación B2B.
-- [x] Bloquear solamente al cliente integrado con `cardCode` tras reintentos fallidos; quien no tiene `cardCode` permanece observador, salvo grupo B2B explícito.
-- [ ] Mantener catálogo visible para B2C y compra exclusiva para B2B.
-- [ ] Revalidar permisos al modificar carrito y crear pedidos.
-- [ ] Definir comportamiento ante datos incompletos, timeout y errores parciales.
+- [x] Bloquear solamente al cliente integrado con `cardCode` tras reintentos fallidos; quien no tiene `cardCode` permanece observador.
+- [x] Mantener catálogo visible para B2C y compra exclusiva para clientes con `cardCode`.
+- [x] Revalidar `cardCode` local antes de modificar carrito, entrar al checkout o ejecutar un controlador de pago.
+- [x] Rechazar perfil/precios incompletos o ajenos al `cardCode` sin escrituras parciales; pedidos/documentos fallan de forma aislada.
 
 ## 5. Calidad y despliegue
 
@@ -79,7 +80,7 @@ No crear ni subir ZIP, TAR ni respaldos durante el despliegue del módulo.
 
 - Ambiente: pruebas (`hoffensdesa.enexum.cl`).
 - Resultado login: `b2b_ready`, sin fallos.
-- Versión desplegada: `0.10.0`.
+- Versión desplegada: `0.11.0`.
 - Muestra integral: 884 ms total y 335 ms de escritura.
 - Precios: 2.029 recibidos, 1.630 escritos, 399 sin SKU local y 0 duplicados.
 - Precio específico validado para el cliente independientemente de su grupo activo.
@@ -115,3 +116,8 @@ No crear ni subir ZIP, TAR ni respaldos durante el despliegue del módulo.
 - La reanudación aplica backoff de 5 minutos ante fallo para evitar reintentos en cada navegación.
 - Hook `actionFrontControllerInitAfter` registrado una sola vez; intervalos 1800/86400 segundos verificados.
 - Política validada: regreso inactivo y antigüedad máxima sincronizan; navegación activa y backoff no sincronizan.
+- Versión 0.11.0 desplegada: `cardCode` local como única identidad B2B y selector de grupos retirado.
+- En modo `rest`, carrito, checkout y controladores frontales de pago revalidan el permiso antes de procesar la solicitud.
+- El caché de login se descarta si está incompleto o corresponde a un `cardCode` distinto.
+- Upgrade validado: versión de base de datos 0.11.0, configuración de grupos eliminada y hook frontal registrado una vez.
+- Sintaxis PHP validada en la VPS; portada mantiene HTTP 503 por el modo mantenimiento ya identificado.

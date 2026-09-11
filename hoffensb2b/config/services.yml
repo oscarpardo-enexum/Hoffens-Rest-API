@@ -4,10 +4,6 @@ services:
     autowire: false
     autoconfigure: false
 
-  hoffens.b2b.prestashop.customer_group_provider:
-    class: Hoffens\B2B\PrestaShop\CustomerGroupProvider
-    public: true
-
   hoffens.b2b.configuration_provider:
     class: Hoffens\B2B\PrestaShop\PrestaShopConfigurationProvider
 
@@ -38,6 +34,12 @@ services:
   hoffens.b2b.customer_card_code_provider:
     class: Hoffens\B2B\Adapter\PrestaShop\CustomerCardCodeProvider
     public: true
+
+  hoffens.b2b.customer_access_policy:
+    class: Hoffens\B2B\Application\Access\CustomerAccessPolicy
+    public: true
+    arguments:
+      - '@hoffens.b2b.customer_card_code_provider'
 
   hoffens.b2b.login_metric_recorder:
     class: Hoffens\B2B\Adapter\Persistence\DbLoginMetricRecorder

@@ -17,7 +17,7 @@ class HoffensB2B extends Module
     {
         $this->name = 'hoffensb2b';
         $this->tab = 'administration';
-        $this->version = '0.10.0';
+        $this->version = '0.11.0';
         $this->author = 'Enexum';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -40,7 +40,6 @@ class HoffensB2B extends Module
             && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::MODE, 'disabled')
             && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::BASE_URL, 'https://apib2b.hoffens.com/api/v1/')
             && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::TOKEN, '')
-            && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::B2B_GROUPS, '')
             && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::CONNECT_TIMEOUT, 2)
             && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::TIMEOUT, 10)
             && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::RETRIES, 2)
@@ -190,10 +189,18 @@ class HoffensB2B extends Module
         $this->enforceIntegrationDecision($decision, $mode);
     }
 
-    public function hookActionFrontControllerInitAfter()
+    public function hookActionFrontControllerInitAfter($params = array())
     {
         $mode = (string) Configuration::get(\Hoffens\B2B\Configuration\ConfigKeys::MODE);
-        if ($mode === 'disabled' || !Validate::isLoadedObject($this->context->customer)) {
+        if ($mode === 'disabled') {
+            return;
+        }
+
+        if ($mode === 'rest') {
+            $this->enforcePurchaseAccess(isset($params['controller']) ? $params['controller'] : null);
+        }
+
+        if (!Validate::isLoadedObject($this->context->customer)) {
             return;
         }
 
@@ -220,10 +227,9 @@ class HoffensB2B extends Module
 
     private function runCustomerIntegration($customerId, $mode)
     {
-        $access = $this->buildAccessPolicy();
         $startedAt = microtime(true);
         try {
-            $decision = $this->buildLoginUseCase($access)->execute((int) $customerId);
+            $decision = $this->buildLoginUseCase()->execute((int) $customerId);
         } catch (Exception $exception) {
             $decision = \Hoffens\B2B\Application\Login\LoginDecision::denied('integration_unavailable');
         }
@@ -294,8 +300,66 @@ class HoffensB2B extends Module
         Tools::redirect($this->context->link->getPageLink('authentication', true));
     }
 
+    private function enforcePurchaseAccess($controller)
+    {
+        if (!$this->isPurchaseController($controller)) {
+            return;
+        }
+
+        $customerId = Validate::isLoadedObject($this->context->customer)
+            ? (int) $this->context->customer->id
+            : 0;
+        if ($this->buildAccessPolicy()->canPurchase($customerId)) {
+            return;
+        }
+
+        PrestaShopLogger::addLog(
+            'Hoffens B2B: intento de compra bloqueado por ausencia de cardCode válido.',
+            2,
+            null,
+            'Customer',
+            $customerId,
+            true
+        );
+
+        $message = $this->l('La compra está disponible únicamente para clientes B2B con cardCode asociado.');
+        if ((bool) Tools::getValue('ajax')) {
+            header('Content-Type: application/json; charset=utf-8');
+            http_response_code(403);
+            die(json_encode(array('success' => false, 'hasError' => true, 'errors' => array($message))));
+        }
+
+        $this->context->cookie->hoffens_b2b_purchase_error = 1;
+        $destination = $customerId > 0
+            ? $this->context->link->getPageLink('my-account', true)
+            : $this->context->link->getPageLink('authentication', true);
+        Tools::redirect($destination);
+    }
+
+    private function isPurchaseController($controller)
+    {
+        if (!is_object($controller)) {
+            return false;
+        }
+
+        $name = isset($controller->php_self) ? strtolower((string) $controller->php_self) : '';
+        if (in_array($name, array('cart', 'order', 'orderopc'), true)) {
+            return true;
+        }
+
+        // Impide saltarse el checkout invocando directamente el controlador
+        // frontal de un medio de pago, sin interferir con callbacks sin sesión.
+        return Validate::isLoadedObject($this->context->customer)
+            && isset($controller->module)
+            && $controller->module instanceof PaymentModule;
+    }
+
     public function hookDisplayCustomerLoginFormAfter()
     {
+        if (!empty($this->context->cookie->hoffens_b2b_purchase_error)) {
+            unset($this->context->cookie->hoffens_b2b_purchase_error);
+            return $this->display(__FILE__, 'views/templates/hook/purchase_error.tpl');
+        }
         if (empty($this->context->cookie->hoffens_b2b_login_error)) {
             return '';
         }
@@ -309,14 +373,18 @@ class HoffensB2B extends Module
             'hoffens_orders_url' => $this->context->link->getModuleLink($this->name, 'orders', array(), true),
             'hoffens_documents_url' => $this->context->link->getModuleLink($this->name, 'documents', array(), true),
         ));
-        return $this->display(__FILE__, 'views/templates/hook/customer_account.tpl');
+        $output = '';
+        if (!empty($this->context->cookie->hoffens_b2b_purchase_error)) {
+            unset($this->context->cookie->hoffens_b2b_purchase_error);
+            $output .= $this->display(__FILE__, 'views/templates/hook/purchase_error.tpl');
+        }
+        return $output . $this->display(__FILE__, 'views/templates/hook/customer_account.tpl');
     }
 
-    private function buildLoginUseCase($access)
+    private function buildLoginUseCase()
     {
         return new \Hoffens\B2B\Application\Login\PrepareCustomerSession(
-            $access,
-            new \Hoffens\B2B\Adapter\PrestaShop\CustomerCardCodeProvider(),
+            $this->buildAccessPolicy(),
             $this->buildApi(),
             new \Hoffens\B2B\Adapter\Persistence\DbLoginSnapshotCache(),
             new \Hoffens\B2B\Adapter\Persistence\DbCustomerPriceSynchronizer(),
@@ -326,12 +394,8 @@ class HoffensB2B extends Module
 
     private function buildAccessPolicy()
     {
-        $groupIds = array_filter(array_map('intval', explode(',', (string) Configuration::get(
-            \Hoffens\B2B\Configuration\ConfigKeys::B2B_GROUPS
-        ))));
-        return new \Hoffens\B2B\Application\Access\B2BAccessPolicy(
-            new \Hoffens\B2B\PrestaShop\CustomerGroupProvider(),
-            $groupIds
+        return new \Hoffens\B2B\Application\Access\CustomerAccessPolicy(
+            new \Hoffens\B2B\Adapter\PrestaShop\CustomerCardCodeProvider()
         );
     }
 
@@ -383,9 +447,6 @@ class HoffensB2B extends Module
         $alertCooldown = (int) Tools::getValue($keys::ALERT_COOLDOWN);
         $healthMaxMs = (int) Tools::getValue($keys::HEALTH_MAX_MS);
         $metricRetention = (int) Tools::getValue($keys::METRIC_RETENTION_DAYS);
-        $groups = Tools::getValue($keys::B2B_GROUPS, array());
-        $groups = is_array($groups) ? array_unique(array_filter(array_map('intval', $groups))) : array();
-
         $errors = array();
         if (strpos($baseUrl, 'https://') !== 0) {
             $errors[] = $this->l('La URL base debe utilizar HTTPS.');
@@ -432,7 +493,6 @@ class HoffensB2B extends Module
         Configuration::updateValue($keys::MODE, $mode);
         Configuration::updateValue($keys::ENABLED, $mode === 'rest' ? 1 : 0);
         Configuration::updateValue($keys::BASE_URL, $baseUrl);
-        Configuration::updateValue($keys::B2B_GROUPS, implode(',', $groups));
         Configuration::updateValue($keys::CONNECT_TIMEOUT, $connectTimeout);
         Configuration::updateValue($keys::TIMEOUT, $timeout);
         Configuration::updateValue($keys::PRICE_TTL, $priceTtl);
@@ -454,9 +514,6 @@ class HoffensB2B extends Module
     private function renderConfigurationForm()
     {
         $keys = '\\Hoffens\\B2B\\Configuration\\ConfigKeys';
-        $groups = Group::getGroups((int) $this->context->language->id);
-        $selectedGroups = array_filter(array_map('intval', explode(',', (string) Configuration::get($keys::B2B_GROUPS))));
-
         $helper = new HelperForm();
         $helper->module = $this;
         $helper->name_controller = $this->name;
@@ -468,7 +525,6 @@ class HoffensB2B extends Module
             $keys::MODE => Configuration::get($keys::MODE),
             $keys::BASE_URL => Configuration::get($keys::BASE_URL),
             $keys::TOKEN => '',
-            $keys::B2B_GROUPS . '[]' => $selectedGroups,
             $keys::CONNECT_TIMEOUT => Configuration::get($keys::CONNECT_TIMEOUT),
             $keys::TIMEOUT => Configuration::get($keys::TIMEOUT),
             $keys::PRICE_TTL => Configuration::get($keys::PRICE_TTL),
@@ -496,12 +552,6 @@ class HoffensB2B extends Module
                 array(
                     'type' => 'password', 'label' => $this->l('Bearer token'), 'name' => $keys::TOKEN,
                     'desc' => $this->l('Déjelo vacío para conservar el token actualmente configurado.'),
-                ),
-                array(
-                    'type' => 'select', 'label' => $this->l('Grupos con permiso de compra B2B'), 'name' => $keys::B2B_GROUPS . '[]',
-                    'multiple' => true,
-                    'desc' => $this->l('No limita las mediciones: todos los clientes autenticados se registran.'),
-                    'options' => array('query' => $groups, 'id' => 'id_group', 'name' => 'name'),
                 ),
                 array('type' => 'text', 'label' => $this->l('Timeout de conexión (s)'), 'name' => $keys::CONNECT_TIMEOUT),
                 array('type' => 'text', 'label' => $this->l('Timeout total (s)'), 'name' => $keys::TIMEOUT),
