@@ -21,14 +21,21 @@ final class LoginDecision
         $this->metrics = $metrics;
     }
 
-    public static function observer()
+    public static function observer($reason = 'b2c_observer', array $metrics = array())
     {
-        return new self(true, false, 'b2c_observer', array(), false, array());
+        return new self(true, false, $reason, array(), false, $metrics);
     }
 
-    public static function allowed(array $snapshot, $cacheHit, array $metrics = array())
+    public static function allowed(array $snapshot, $cacheHit, array $metrics = array(), $isB2B = true)
     {
-        return new self(true, true, 'b2b_ready', $snapshot, $cacheHit, $metrics);
+        return new self(
+            true,
+            $isB2B,
+            $isB2B ? 'b2b_ready' : 'b2c_observed',
+            $snapshot,
+            $cacheHit,
+            $metrics
+        );
     }
 
     public static function denied($reason, array $metrics = array())

@@ -27,10 +27,13 @@ La arquitectura y el proceso de evolución están documentados en
 - Modo desactivado, sombra y REST.
 - Hook de autenticación inactivo mientras el modo sea `disabled`.
 - Perfil y precios concurrentes durante el login autenticado.
+- Validación contractual de los datos críticos antes de operar como B2B.
+- El cliente sin `cardCode` se mide como observador; un `cardCode` válido activa la integración SAP.
 - Reemplazo atómico de precios específicos por cliente y lista, con rollback.
 - Los clientes sin `cardCode` no generan llamadas a SAP.
 - Caché comprimida opcional; TTL predeterminado en cero (tiempo real).
 - `cardCode` leído desde `{prefix}customer.card_code`, igual que el portal actual.
+- Payloads validados de pedidos y pagos preparados sin activar todavía los POST.
 
 No se almacena ningún token real en este repositorio. Debe configurarse mediante
 el formulario del módulo, `config/local.php` o `HOFFENS_B2B_API_TOKEN`.

@@ -17,7 +17,7 @@ class HoffensB2B extends Module
     {
         $this->name = 'hoffensb2b';
         $this->tab = 'administration';
-        $this->version = '0.8.0';
+        $this->version = '0.9.0';
         $this->author = 'Enexum';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -232,7 +232,7 @@ class HoffensB2B extends Module
             );
         }
 
-        if ($mode === 'shadow' || $decision->isAllowed()) {
+        if ($mode === 'shadow' || !$decision->isB2B() || $decision->isAllowed()) {
             return;
         }
 
@@ -585,7 +585,7 @@ class HoffensB2B extends Module
         $summary = Db::getInstance()->getRow(
             'SELECT COUNT(*) AS total,
                     ROUND(AVG(total_ms)) AS average_ms,
-                    SUM(result <> "b2b_ready") AS failures,
+                    SUM(result IN ("integration_unavailable", "missing_card_code")) AS failures,
                     SUM(cache_hit = 1) AS cache_hits
              FROM `' . bqSQL($table) . '`
              WHERE created_at >= DATE_SUB(UTC_TIMESTAMP(), INTERVAL 24 HOUR)'

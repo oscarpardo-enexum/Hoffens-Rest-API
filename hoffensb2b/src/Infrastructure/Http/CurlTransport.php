@@ -11,10 +11,12 @@ use Hoffens\B2B\Http\HttpResponse;
 final class CurlTransport implements HttpTransportInterface
 {
     private $config;
+    private $transientFailures;
 
-    public function __construct(IntegrationConfig $config)
+    public function __construct(IntegrationConfig $config, TransientFailurePolicy $transientFailures = null)
     {
         $this->config = $config;
+        $this->transientFailures = $transientFailures ?: new TransientFailurePolicy();
     }
 
     public function send(HttpRequest $request)
@@ -28,7 +30,7 @@ final class CurlTransport implements HttpTransportInterface
         for ($attempt = 0; $attempt <= $maxRetries; $attempt++) {
             try {
                 $response = $this->sendOnce($request);
-                if (!$this->isTransient($response->statusCode()) || $attempt === $maxRetries) {
+                if (!$this->transientFailures->isRetryableStatus($response->statusCode()) || $attempt === $maxRetries) {
                     return $response;
                 }
             } catch (ApiException $exception) {
@@ -123,7 +125,7 @@ final class CurlTransport implements HttpTransportInterface
 
         // Solo los fallos transitorios se reintentan; el camino exitoso no agrega latencia.
         foreach ($responses as $key => $response) {
-            if ($this->config->retries() > 0 && $this->isTransient($response->statusCode())) {
+            if ($this->config->retries() > 0 && $this->transientFailures->isRetryableStatus($response->statusCode())) {
                 $responses[$key] = $this->sendWithRetries($requests[$key], $this->config->retries() - 1);
             }
         }
@@ -171,11 +173,6 @@ final class CurlTransport implements HttpTransportInterface
             curl_close($handle);
         }
         curl_multi_close($multi);
-    }
-
-    private function isTransient($statusCode)
-    {
-        return in_array((int) $statusCode, array(429, 502, 503, 504), true);
     }
 
     private function metricsForHandle($handle, $body)

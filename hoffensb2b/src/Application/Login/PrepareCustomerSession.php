@@ -18,6 +18,7 @@ final class PrepareCustomerSession
     private $cache;
     private $priceSynchronizer;
     private $cacheTtl;
+    private $validator;
 
     public function __construct(
         B2BAccessPolicy $access,
@@ -25,7 +26,8 @@ final class PrepareCustomerSession
         HoffensApiInterface $api,
         LoginSnapshotCacheInterface $cache,
         CustomerPriceSynchronizerInterface $priceSynchronizer,
-        $cacheTtl
+        $cacheTtl,
+        LoginSnapshotValidator $validator = null
     ) {
         $this->access = $access;
         $this->cardCodes = $cardCodes;
@@ -33,6 +35,7 @@ final class PrepareCustomerSession
         $this->cache = $cache;
         $this->priceSynchronizer = $priceSynchronizer;
         $this->cacheTtl = max(0, (int) $cacheTtl);
+        $this->validator = $validator ?: new LoginSnapshotValidator();
     }
 
     public function execute($customerId)
@@ -40,6 +43,7 @@ final class PrepareCustomerSession
         $startedAt = microtime(true);
         $metrics = array();
         $customerId = (int) $customerId;
+        $isB2BGroup = $this->access->isB2B($customerId);
         if (!$this->access->shouldIntegrateLogin($customerId)) {
             return LoginDecision::observer();
         }
@@ -50,7 +54,7 @@ final class PrepareCustomerSession
             $metrics['cacheMs'] = $this->elapsedMs($cacheStartedAt);
             if (is_array($cached)) {
                 $metrics['totalUseCaseMs'] = $this->elapsedMs($startedAt);
-                return LoginDecision::allowed($cached, true, $metrics);
+                return LoginDecision::allowed($cached, true, $metrics, true);
             }
         }
 
@@ -59,12 +63,18 @@ final class PrepareCustomerSession
         $metrics['cardCodeLookupMs'] = $this->elapsedMs($mappingStartedAt);
         if ($rawCardCode === null || trim($rawCardCode) === '') {
             $metrics['totalUseCaseMs'] = $this->elapsedMs($startedAt);
-            return LoginDecision::denied('missing_card_code', $metrics);
+            return $isB2BGroup
+                ? LoginDecision::denied('missing_card_code', $metrics)
+                : LoginDecision::observer('b2c_observer', $metrics);
         }
 
         try {
+            // Un cardCode válido identifica a un cliente integrado con SAP aunque
+            // la lista opcional de grupos B2B aún no esté configurada.
+            $isB2B = true;
+            $cardCode = new CardCode($rawCardCode);
             $apiStartedAt = microtime(true);
-            $snapshot = $this->api->loginSnapshot(new CardCode($rawCardCode));
+            $snapshot = $this->api->loginSnapshot($cardCode);
             $metrics['apiBatchMs'] = $this->elapsedMs($apiStartedAt);
             if (isset($snapshot['_telemetry']) && is_array($snapshot['_telemetry'])) {
                 $metrics['endpoints'] = $snapshot['_telemetry'];
@@ -72,22 +82,27 @@ final class PrepareCustomerSession
             }
             $metrics['priceCount'] = isset($snapshot['prices']) && is_array($snapshot['prices'])
                 ? count($snapshot['prices']) : 0;
-            $syncStartedAt = microtime(true);
-            $sync = $this->priceSynchronizer->synchronize($customerId, $snapshot['prices']);
-            $metrics['priceSyncMs'] = $this->elapsedMs($syncStartedAt);
-            $metrics['priceMapped'] = (int) $sync['mapped'];
-            $metrics['priceUnmatched'] = (int) $sync['unmatched'];
-            $metrics['priceWritten'] = (int) $sync['written'];
-            $metrics['priceGroupId'] = (int) $sync['groupId'];
-            $metrics['priceUnchanged'] = !empty($sync['unchanged']);
+            if ($isB2B) {
+                $this->validator->validate($cardCode, $snapshot);
+                $syncStartedAt = microtime(true);
+                $sync = $this->priceSynchronizer->synchronize($customerId, $snapshot['prices']);
+                $metrics['priceSyncMs'] = $this->elapsedMs($syncStartedAt);
+                $metrics['priceMapped'] = (int) $sync['mapped'];
+                $metrics['priceUnmatched'] = (int) $sync['unmatched'];
+                $metrics['priceWritten'] = (int) $sync['written'];
+                $metrics['priceGroupId'] = (int) $sync['groupId'];
+                $metrics['priceUnchanged'] = !empty($sync['unchanged']);
+            }
             if ($this->cacheTtl > 0) {
                 $this->cache->put($customerId, $snapshot);
             }
             $metrics['totalUseCaseMs'] = $this->elapsedMs($startedAt);
-            return LoginDecision::allowed($snapshot, false, $metrics);
+            return LoginDecision::allowed($snapshot, false, $metrics, $isB2B);
         } catch (IntegrationException $exception) {
             $metrics['totalUseCaseMs'] = $this->elapsedMs($startedAt);
-            return LoginDecision::denied('integration_unavailable', $metrics);
+            return $isB2B
+                ? LoginDecision::denied('integration_unavailable', $metrics)
+                : LoginDecision::observer('b2c_integration_unavailable', $metrics);
         }
     }
 

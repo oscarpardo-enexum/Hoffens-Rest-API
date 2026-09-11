@@ -45,6 +45,13 @@ Las clases de dominio y aplicación no deben usar `Context`, `Db`, `Tools`,
 - La autorización debe comprobarse nuevamente en servidor al modificar el
   carrito y antes de crear una orden. Ocultar botones no es seguridad.
 
+Todos los clientes autenticados pueden generar telemetría de login. Un `cardCode`
+válido identifica al cliente que participa en la integración SAP, aunque todavía
+no se hayan configurado grupos B2B; para él se validan y actualizan los precios.
+Los grupos quedan reservados para autorizar la compra. Un cliente sin `cardCode`
+permanece como observador, salvo que pertenezca explícitamente a un grupo B2B, en
+cuyo caso la falta del identificador es un error crítico.
+
 El scaffold todavía no registra hooks que cambien el comportamiento del sitio.
 Eso se hará después de mapear el flujo B2B actual, para no duplicar ni romper
 las restricciones existentes.
@@ -79,6 +86,12 @@ solicitan concurrentemente durante el login para evitar sumar sus latencias.
 El TTL predeterminado es cero: cada login B2B obtiene información en tiempo real.
 La caché local solo puede habilitarse cuando negocio apruebe explícitamente una
 ventana de vigencia.
+
+Antes de escribir precios para un B2B se valida que el perfil corresponda al
+`cardCode` solicitado y contenga razón social, crédito, deuda, cobranza,
+direcciones y cuenta corriente con los tipos definidos en el contrato. Una
+respuesta incompleta se trata como indisponibilidad y no deja una actualización
+parcial.
 
 La sincronización de login reemplaza los `specific_price` del cliente dentro de
 una transacción InnoDB. Se utiliza `id_customer` con `id_group = 0`, porque el

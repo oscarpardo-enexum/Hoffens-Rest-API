@@ -22,7 +22,19 @@ final class PrepareCustomerSessionTest extends TestCase
 
         $this->assertTrue($decision->isAllowed());
         $this->assertTrue($decision->isB2B());
+        $this->assertSame('b2b_ready', $decision->reason());
         $this->assertSame(1, $api->loginCalls);
+    }
+
+    public function testB2CWithoutCardCodeRemainsObserver()
+    {
+        $api = new FakeApi();
+        $decision = $this->useCase(array(3), $api, null)->execute(10);
+
+        $this->assertTrue($decision->isAllowed());
+        $this->assertFalse($decision->isB2B());
+        $this->assertSame('b2c_observer', $decision->reason());
+        $this->assertSame(0, $api->loginCalls);
     }
 
     public function testB2BLoadsProfileAndPricesOnce()
@@ -100,7 +112,22 @@ final class FakePriceSynchronizer implements CustomerPriceSynchronizerInterface
 final class FakeApi implements HoffensApiInterface
 {
     public $loginCalls = 0;
-    public function loginSnapshot($cardCode) { $this->loginCalls++; return array('customer' => array(), 'prices' => array()); }
+    public function loginSnapshot($cardCode)
+    {
+        $this->loginCalls++;
+        return array(
+            'customer' => array(
+                'cardCode' => 'C1',
+                'razonSocial' => 'Cliente de prueba',
+                'lineaCredito' => 1000,
+                'deudaTotal' => 100,
+                'cobranza' => array('saldoVencido' => 0, 'documentosVencidos' => 0),
+                'direcciones' => array(),
+                'cuentaCorriente' => array(),
+            ),
+            'prices' => array(array('itemCode' => 'SKU1')),
+        );
+    }
     public function health() { return array(); }
     public function customer($cardCode) { return array(); }
     public function customerPrices($cardCode) { return array(); }

@@ -6,8 +6,10 @@ Estados: `[x]` terminado · `[~]` en curso · `[ ]` pendiente
 
 1. Implementar y revisar en local.
 2. Validar sintaxis, pruebas y compatibilidad con PrestaShop 1.7.8.11 / PHP 7.1.
-3. Respaldar y subir únicamente `hoffensb2b` al ambiente de pruebas.
+3. Subir directamente únicamente los archivos modificados de `hoffensb2b` al ambiente de pruebas.
 4. Ejecutar smoke test y registrar el resultado.
+
+No crear ni subir ZIP, TAR ni respaldos durante el despliegue del módulo.
 
 ## 1. Base técnica
 
@@ -29,7 +31,7 @@ Estados: `[x]` terminado · `[~]` en curso · `[ ]` pendiente
 
 ## 3. Migración funcional REST
 
-- [~] Perfil del cliente, crédito/deuda, direcciones y equipo de ventas.
+- [~] Perfil del cliente, crédito/deuda, direcciones y equipo de ventas. *(Consulta y validación contractual listas; falta uso completo en el portal)*
 - [x] Actualizar atómicamente los precios del `cardCode` y su lista durante el login.
 - [x] Evitar escrituras de precios sin cambios mediante checksum de fuente y mapeo.
 - [~] Reportar y resolver con negocio los SKU REST ausentes del catálogo local.
@@ -43,11 +45,12 @@ Estados: `[x]` terminado · `[~]` en curso · `[ ]` pendiente
 - [x] Definir mapeo, estados, idempotencia, convivencia y corte de SOAP (`docs/order-payment-migration.md`).
 - [~] Crear outbox transaccional común para solicitudes de pedido y pagos. *(Esquema, dominio y encolado listos; falta trabajador)*
 - [x] Construir y validar el payload contractual de solicitud de pedido, sin precios ni impuestos.
-- [ ] Resolver `direccionDespacho` desde `address.correlativo_sap` y bloquear códigos ausentes/obsoletos.
+- [~] Resolver `direccionDespacho` desde `address.correlativo_sap` y bloquear códigos ausentes/obsoletos. *(Resolvedor listo; falta conectarlo al evento de pedido)*
 - [ ] Acordar el mapeo a `glosa` de comentarios, retiro por tercero y referencias adicionales.
 - [ ] Confirmar el estado/evento local que habilita el envío; no asumir los IDs personalizados `1` y `3`.
 - [ ] Implementar envío de pedidos con clave estable y seguimiento hasta `creadaSap`/`observada`.
 - [ ] Persistir `DocEntry` y tipo documental desde la selección de deuda antes de iniciar el pago.
+- [x] Construir y validar el payload de pago: documentos únicos, `DocEntry` y suma FC menos NC.
 - [ ] Encolar pagos solo después de la confirmación del proveedor y validar la suma FC/ND menos NC.
 - [ ] Implementar envío de pagos con clave estable, conciliación y visualización de observados.
 - [ ] Probar pedidos y pagos en modo sombra antes de habilitar cualquier POST real.
@@ -55,8 +58,8 @@ Estados: `[x]` terminado · `[~]` en curso · `[ ]` pendiente
 
 ## 4. Reglas del portal
 
-- [ ] Validar información crítica de SAP antes de habilitar la operación.
-- [ ] Bloquear el acceso operativo tras reintentos fallidos en modo `rest`.
+- [x] Validar información crítica de SAP antes de habilitar la operación B2B.
+- [x] Bloquear solamente al cliente integrado con `cardCode` tras reintentos fallidos; quien no tiene `cardCode` permanece observador, salvo grupo B2B explícito.
 - [ ] Mantener catálogo visible para B2C y compra exclusiva para B2B.
 - [ ] Revalidar permisos al modificar carrito y crear pedidos.
 - [ ] Definir comportamiento ante datos incompletos, timeout y errores parciales.
@@ -75,7 +78,7 @@ Estados: `[x]` terminado · `[~]` en curso · `[ ]` pendiente
 
 - Ambiente: pruebas (`hoffensdesa.enexum.cl`).
 - Resultado login: `b2b_ready`, sin fallos.
-- Versión desplegada: `0.8.0`.
+- Versión desplegada: `0.9.0`.
 - Muestra integral: 884 ms total y 335 ms de escritura.
 - Precios: 2.029 recibidos, 1.630 escritos, 399 sin SKU local y 0 duplicados.
 - Precio específico validado para el cliente independientemente de su grupo activo.
@@ -100,3 +103,10 @@ Estados: `[x]` terminado · `[~]` en curso · `[ ]` pendiente
 - Brecha de pagos: el flujo antiguo conserva folio, pero REST exige persistir `DocEntry` y tipo documental.
 - Outbox 0.8.0 instalada y vacía; todavía no existen hooks ni trabajadores que ejecuten POST.
 - Validación posterior: sintaxis PHP correcta, módulo activo, tabla creada y portada HTTP 200.
+- Versión 0.9.0 desplegada: validación crítica del perfil/precios y separación entre cliente integrado y observador.
+- Reintentos ampliados a timeout HTTP 408, límite 429 y errores transitorios 500/502/503/504.
+- Validadores de payload para pedidos y pagos preparados sin activar llamadas POST.
+- Contrato real validado: 2.029 precios y dirección local contrastada correctamente con SAP.
+- Caso de login ejecutado: `b2b_ready`, 1.630 precios escritos y sin llamadas POST.
+- Portada responde HTTP 503 porque PrestaShop está en modo mantenimiento; no corresponde a un error del módulo.
+- Ruta de pedidos sin sesión responde HTTP 302 hacia autenticación, según lo esperado.
