@@ -25,6 +25,7 @@ No crear ni subir ZIP, TAR ni respaldos durante el despliegue del módulo.
 - [x] Medir login: total, perfil, precios, registros, tamaño, caché y resultado.
 - [x] Consultar perfil y precios en paralelo.
 - [x] Medir a todo cliente autenticado, sin filtrar por grupo.
+- [x] Resincronizar al reanudar una sesión persistente, sin consultar SAP en cada página.
 - [x] Alertas a TI con deduplicación y recuperación; el agendamiento queda a cargo del administrador.
 - [x] Definir umbrales operativos y política de retención de métricas.
 - [ ] Programar en hPanel el cron de monitoreo cada 5 minutos. *(Responsable: administrador Hostinger)*
@@ -78,7 +79,7 @@ No crear ni subir ZIP, TAR ni respaldos durante el despliegue del módulo.
 
 - Ambiente: pruebas (`hoffensdesa.enexum.cl`).
 - Resultado login: `b2b_ready`, sin fallos.
-- Versión desplegada: `0.9.0`.
+- Versión desplegada: `0.10.0`.
 - Muestra integral: 884 ms total y 335 ms de escritura.
 - Precios: 2.029 recibidos, 1.630 escritos, 399 sin SKU local y 0 duplicados.
 - Precio específico validado para el cliente independientemente de su grupo activo.
@@ -110,3 +111,7 @@ No crear ni subir ZIP, TAR ni respaldos durante el despliegue del módulo.
 - Caso de login ejecutado: `b2b_ready`, 1.630 precios escritos y sin llamadas POST.
 - Portada responde HTTP 503 porque PrestaShop está en modo mantenimiento; no corresponde a un error del módulo.
 - Ruta de pedidos sin sesión responde HTTP 302 hacia autenticación, según lo esperado.
+- Versión 0.10.0 desplegada: reanudación tras 30 minutos de inactividad y actualización máxima cada 24 horas.
+- La reanudación aplica backoff de 5 minutos ante fallo para evitar reintentos en cada navegación.
+- Hook `actionFrontControllerInitAfter` registrado una sola vez; intervalos 1800/86400 segundos verificados.
+- Política validada: regreso inactivo y antigüedad máxima sincronizan; navegación activa y backoff no sincronizan.

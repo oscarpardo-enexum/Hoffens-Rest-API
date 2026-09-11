@@ -27,6 +27,7 @@ La arquitectura y el proceso de evolución están documentados en
 - Modo desactivado, sombra y REST.
 - Hook de autenticación inactivo mientras el modo sea `disabled`.
 - Perfil y precios concurrentes durante el login autenticado.
+- Resincronización al regresar con una sesión persistente, sin llamar a SAP en cada página.
 - Validación contractual de los datos críticos antes de operar como B2B.
 - El cliente sin `cardCode` se mide como observador; un `cardCode` válido activa la integración SAP.
 - Reemplazo atómico de precios específicos por cliente y lista, con rollback.

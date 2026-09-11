@@ -17,7 +17,7 @@ class HoffensB2B extends Module
     {
         $this->name = 'hoffensb2b';
         $this->tab = 'administration';
-        $this->version = '0.9.0';
+        $this->version = '0.10.0';
         $this->author = 'Enexum';
         $this->need_instance = 0;
         $this->bootstrap = true;
@@ -45,12 +45,15 @@ class HoffensB2B extends Module
             && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::TIMEOUT, 10)
             && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::RETRIES, 2)
             && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::PRICE_TTL, 0)
+            && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::SESSION_IDLE_SECONDS, 1800)
+            && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::SESSION_MAX_AGE_SECONDS, 86400)
             && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::ALERT_EMAILS, (string) Configuration::get('PS_SHOP_EMAIL'))
             && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::ALERT_COOLDOWN, 30)
             && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::HEALTH_MAX_MS, 2000)
             && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::METRIC_RETENTION_DAYS, 30)
             && Configuration::updateValue(\Hoffens\B2B\Configuration\ConfigKeys::CRON_TOKEN, Tools::passwdGen(40))
             && $this->registerHook('actionAuthentication')
+            && $this->registerHook('actionFrontControllerInitAfter')
             && $this->registerHook('displayCustomerLoginFormAfter')
             && $this->registerHook('displayCustomerAccount');
     }
@@ -67,6 +70,8 @@ class HoffensB2B extends Module
             \Hoffens\B2B\Configuration\ConfigKeys::TIMEOUT,
             \Hoffens\B2B\Configuration\ConfigKeys::RETRIES,
             \Hoffens\B2B\Configuration\ConfigKeys::PRICE_TTL,
+            \Hoffens\B2B\Configuration\ConfigKeys::SESSION_IDLE_SECONDS,
+            \Hoffens\B2B\Configuration\ConfigKeys::SESSION_MAX_AGE_SECONDS,
             \Hoffens\B2B\Configuration\ConfigKeys::ALERT_EMAILS,
             \Hoffens\B2B\Configuration\ConfigKeys::ALERT_COOLDOWN,
             \Hoffens\B2B\Configuration\ConfigKeys::HEALTH_MAX_MS,
@@ -180,14 +185,45 @@ class HoffensB2B extends Module
             return;
         }
 
-        $access = $this->buildAccessPolicy();
-        if (!$access->shouldIntegrateLogin((int) $params['customer']->id)) {
+        $decision = $this->runCustomerIntegration((int) $params['customer']->id, $mode);
+        $this->updateSessionRefreshState($decision, time());
+        $this->enforceIntegrationDecision($decision, $mode);
+    }
+
+    public function hookActionFrontControllerInitAfter()
+    {
+        $mode = (string) Configuration::get(\Hoffens\B2B\Configuration\ConfigKeys::MODE);
+        if ($mode === 'disabled' || !Validate::isLoadedObject($this->context->customer)) {
             return;
         }
 
+        $now = time();
+        $policy = new \Hoffens\B2B\Application\Login\SessionRefreshPolicy(
+            (int) Configuration::get(\Hoffens\B2B\Configuration\ConfigKeys::SESSION_IDLE_SECONDS),
+            (int) Configuration::get(\Hoffens\B2B\Configuration\ConfigKeys::SESSION_MAX_AGE_SECONDS)
+        );
+        $lastActivity = (int) $this->context->cookie->hoffens_b2b_last_activity;
+        $lastSync = (int) $this->context->cookie->hoffens_b2b_last_sync;
+        $nextAttempt = (int) $this->context->cookie->hoffens_b2b_next_attempt;
+        $this->context->cookie->hoffens_b2b_last_activity = $now;
+
+        if (!$policy->shouldRefresh($now, $lastActivity, $lastSync, $nextAttempt)) {
+            return;
+        }
+
+        // Evita reintentar en cada página si SAP falla al reanudar la sesión.
+        $this->context->cookie->hoffens_b2b_next_attempt = $now + 300;
+        $decision = $this->runCustomerIntegration((int) $this->context->customer->id, $mode);
+        $this->updateSessionRefreshState($decision, $now);
+        $this->enforceIntegrationDecision($decision, $mode);
+    }
+
+    private function runCustomerIntegration($customerId, $mode)
+    {
+        $access = $this->buildAccessPolicy();
         $startedAt = microtime(true);
         try {
-            $decision = $this->buildLoginUseCase($access)->execute((int) $params['customer']->id);
+            $decision = $this->buildLoginUseCase($access)->execute((int) $customerId);
         } catch (Exception $exception) {
             $decision = \Hoffens\B2B\Application\Login\LoginDecision::denied('integration_unavailable');
         }
@@ -197,20 +233,20 @@ class HoffensB2B extends Module
             if ($decision->reason() === 'integration_unavailable') {
                 $incidents->reportFailure(
                     'login_integration',
-                    'Los servicios requeridos durante el login no respondieron correctamente.',
+                    'Los servicios requeridos durante el acceso no respondieron correctamente.',
                     (int) Configuration::get(\Hoffens\B2B\Configuration\ConfigKeys::ALERT_COOLDOWN)
                 );
             } elseif ($decision->reason() === 'b2b_ready') {
-                $incidents->reportRecovery('login_integration', 'La integración de login volvió a responder correctamente.');
+                $incidents->reportRecovery('login_integration', 'La integración de acceso volvió a responder correctamente.');
             }
         } catch (Exception $exception) {
             // El registro de incidentes tampoco puede bloquear al cliente.
         }
-        $elapsedMs = (int) round((microtime(true) - $startedAt) * 1000);
 
+        $elapsedMs = (int) round((microtime(true) - $startedAt) * 1000);
         try {
             (new \Hoffens\B2B\Adapter\Persistence\DbLoginMetricRecorder())->record(
-                (int) $params['customer']->id,
+                (int) $customerId,
                 $mode,
                 $decision,
                 $elapsedMs
@@ -219,23 +255,40 @@ class HoffensB2B extends Module
             // La observabilidad nunca puede impedir el acceso del cliente.
         }
 
-        // Evita una escritura SQL en cada login exitoso; se registran fallos y lentitud.
         if (!$decision->isAllowed() || $elapsedMs >= 2000) {
             PrestaShopLogger::addLog(
-                sprintf('Hoffens B2B login: result=%s cache=%s duration_ms=%d',
-                    $decision->reason(), $decision->isCacheHit() ? 'hit' : 'miss', $elapsedMs),
+                sprintf(
+                    'Hoffens B2B access: result=%s cache=%s duration_ms=%d',
+                    $decision->reason(),
+                    $decision->isCacheHit() ? 'hit' : 'miss',
+                    $elapsedMs
+                ),
                 $decision->isAllowed() ? 2 : 3,
                 null,
                 'Customer',
-                (int) $params['customer']->id,
+                (int) $customerId,
                 true
             );
         }
+        return $decision;
+    }
 
+    private function updateSessionRefreshState($decision, $now)
+    {
+        $this->context->cookie->hoffens_b2b_last_activity = (int) $now;
+        if ($decision->isAllowed()) {
+            $this->context->cookie->hoffens_b2b_last_sync = (int) $now;
+            $this->context->cookie->hoffens_b2b_next_attempt = 0;
+        } else {
+            $this->context->cookie->hoffens_b2b_next_attempt = (int) $now + 300;
+        }
+    }
+
+    private function enforceIntegrationDecision($decision, $mode)
+    {
         if ($mode === 'shadow' || !$decision->isB2B() || $decision->isAllowed()) {
             return;
         }
-
         $this->context->customer->logout();
         $this->context->cookie->hoffens_b2b_login_error = $decision->reason();
         Tools::redirect($this->context->link->getPageLink('authentication', true));
@@ -323,6 +376,8 @@ class HoffensB2B extends Module
         $connectTimeout = (int) Tools::getValue($keys::CONNECT_TIMEOUT);
         $timeout = (int) Tools::getValue($keys::TIMEOUT);
         $priceTtl = (int) Tools::getValue($keys::PRICE_TTL);
+        $sessionIdle = (int) Tools::getValue($keys::SESSION_IDLE_SECONDS);
+        $sessionMaxAge = (int) Tools::getValue($keys::SESSION_MAX_AGE_SECONDS);
         $retries = (int) Tools::getValue($keys::RETRIES);
         $alertEmails = trim((string) Tools::getValue($keys::ALERT_EMAILS));
         $alertCooldown = (int) Tools::getValue($keys::ALERT_COOLDOWN);
@@ -343,6 +398,12 @@ class HoffensB2B extends Module
         }
         if ($priceTtl < 0) {
             $errors[] = $this->l('La vigencia de precios no puede ser negativa.');
+        }
+        if ($sessionIdle < 300 || $sessionIdle > 86400) {
+            $errors[] = $this->l('La inactividad para resincronizar debe estar entre 300 y 86400 segundos.');
+        }
+        if ($sessionMaxAge < $sessionIdle || $sessionMaxAge > 604800) {
+            $errors[] = $this->l('La actualización máxima debe ser igual o mayor a la inactividad y no superar 604800 segundos.');
         }
         if ($retries < 0 || $retries > 3) {
             $errors[] = $this->l('Los reintentos deben estar entre 0 y 3.');
@@ -375,6 +436,8 @@ class HoffensB2B extends Module
         Configuration::updateValue($keys::CONNECT_TIMEOUT, $connectTimeout);
         Configuration::updateValue($keys::TIMEOUT, $timeout);
         Configuration::updateValue($keys::PRICE_TTL, $priceTtl);
+        Configuration::updateValue($keys::SESSION_IDLE_SECONDS, $sessionIdle);
+        Configuration::updateValue($keys::SESSION_MAX_AGE_SECONDS, $sessionMaxAge);
         Configuration::updateValue($keys::RETRIES, $retries);
         Configuration::updateValue($keys::ALERT_EMAILS, implode(',', $this->parseAlertEmails($alertEmails)));
         Configuration::updateValue($keys::ALERT_COOLDOWN, $alertCooldown);
@@ -409,6 +472,8 @@ class HoffensB2B extends Module
             $keys::CONNECT_TIMEOUT => Configuration::get($keys::CONNECT_TIMEOUT),
             $keys::TIMEOUT => Configuration::get($keys::TIMEOUT),
             $keys::PRICE_TTL => Configuration::get($keys::PRICE_TTL),
+            $keys::SESSION_IDLE_SECONDS => Configuration::get($keys::SESSION_IDLE_SECONDS),
+            $keys::SESSION_MAX_AGE_SECONDS => Configuration::get($keys::SESSION_MAX_AGE_SECONDS),
             $keys::RETRIES => Configuration::get($keys::RETRIES),
             $keys::ALERT_EMAILS => Configuration::get($keys::ALERT_EMAILS),
             $keys::ALERT_COOLDOWN => Configuration::get($keys::ALERT_COOLDOWN),
@@ -442,6 +507,16 @@ class HoffensB2B extends Module
                 array('type' => 'text', 'label' => $this->l('Timeout total (s)'), 'name' => $keys::TIMEOUT),
                 array('type' => 'text', 'label' => $this->l('Reintentos transitorios'), 'name' => $keys::RETRIES),
                 array('type' => 'text', 'label' => $this->l('Vigencia caché de login (s)'), 'name' => $keys::PRICE_TTL),
+                array(
+                    'type' => 'text', 'label' => $this->l('Reanudar tras inactividad (s)'),
+                    'name' => $keys::SESSION_IDLE_SECONDS,
+                    'desc' => $this->l('Tras este tiempo sin navegar, la primera página vuelve a sincronizar. Predeterminado: 1800.'),
+                ),
+                array(
+                    'type' => 'text', 'label' => $this->l('Actualización máxima de sesión (s)'),
+                    'name' => $keys::SESSION_MAX_AGE_SECONDS,
+                    'desc' => $this->l('Fuerza una sincronización aun con actividad continua. Predeterminado: 86400.'),
+                ),
                 array('type' => 'text', 'label' => $this->l('Correos de alerta TI'), 'name' => $keys::ALERT_EMAILS,
                     'desc' => $this->l('Uno o más correos separados por coma.')),
                 array('type' => 'text', 'label' => $this->l('Deduplicación de alertas (min)'), 'name' => $keys::ALERT_COOLDOWN),

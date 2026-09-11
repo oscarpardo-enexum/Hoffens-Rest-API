@@ -87,6 +87,14 @@ El TTL predeterminado es cero: cada login B2B obtiene información en tiempo rea
 La caché local solo puede habilitarse cuando negocio apruebe explícitamente una
 ventana de vigencia.
 
+Una cookie persistente puede mantener autenticado al cliente durante varios días,
+por lo que `actionAuthentication` no cubre por sí solo cada regreso al portal. El
+módulo también utiliza `actionFrontControllerInitAfter`: la primera navegación
+después de 30 minutos de inactividad vuelve a ejecutar el caso de uso del login.
+La navegación activa solo actualiza timestamps locales y no consulta SAP en cada
+página. Como resguardo, una sesión continuamente activa se resincroniza cada 24
+horas. Un fallo aplica cinco minutos de espera antes de otro intento.
+
 Antes de escribir precios para un B2B se valida que el perfil corresponda al
 `cardCode` solicitado y contenga razón social, crédito, deuda, cobranza,
 direcciones y cuenta corriente con los tipos definidos en el contrato. Una
